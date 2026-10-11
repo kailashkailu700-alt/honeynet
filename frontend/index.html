@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0a0e17">
+  <title>HoneyNet — Live Attack Dashboard</title>
+  <style>
+    :root { color-scheme: dark; --bg: #0a0e17; --panel: #111827; --line: #243044; --green: #00ff41; --red: #ff0040; --orange: #ff9d00; --muted: #91a0b5; }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; background: var(--bg); color: var(--green); font-family: 'Courier New', monospace; }
+    header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 1.1rem clamp(1rem, 4vw, 3rem); border-bottom: 1px solid var(--line); background: #0d1320; }
+    h1 { margin: 0; font-size: clamp(1.05rem, 2.7vw, 1.7rem); letter-spacing: .03em; }
+    .live { white-space: nowrap; color: var(--green); font-weight: bold; }
+    .live-dot { animation: pulse 1.2s infinite; }
+    main { width: min(1400px, 100%); margin: auto; padding: clamp(1rem, 3vw, 2rem); }
+    .stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; margin-bottom: 1.6rem; }
+    .card, .table-wrap { border: 1px solid var(--line); border-radius: 8px; background: var(--panel); box-shadow: 0 8px 30px #0003; }
+    .card { padding: 1.2rem; }
+    .label { color: var(--muted); font-size: .82rem; letter-spacing: .08em; }
+    .value { margin-top: .65rem; font-size: clamp(1.6rem, 4vw, 2.5rem); font-weight: bold; }
+    h2 { margin: 0; padding: 1rem 1.1rem; border-bottom: 1px solid var(--line); font-size: 1rem; }
+    .table-wrap { overflow: hidden; }
+    .scroll { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; min-width: 620px; text-align: left; }
+    th, td { padding: .85rem 1rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+    th { color: var(--muted); font-size: .78rem; letter-spacing: .08em; }
+    tbody tr:last-child td { border-bottom: 0; }
+    td.ip { color: var(--red); font-weight: bold; }
+    td.service { color: var(--orange); text-transform: uppercase; }
+    td.payload { color: #c7d2e2; white-space: pre-wrap; overflow-wrap: anywhere; max-width: 55vw; }
+    .empty { color: var(--muted); text-align: center; padding: 2rem; }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
+    @keyframes flash { 0% { background: #00ff4140; } 100% { background: transparent; } }
+    .new-attack { animation: flash 1.8s ease-out; }
+    @media (max-width: 650px) { header { align-items: flex-start; } .stats { grid-template-columns: 1fr; gap: .7rem; } .card { padding: .9rem 1rem; } .value { margin-top: .3rem; } }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>🍯 HONEYNET — Live Attack Dashboard</h1>
+    <div class="live"><span class="live-dot">●</span> LIVE</div>
+  </header>
+  <main>
+    <section class="stats" aria-label="Attack statistics">
+      <article class="card"><div class="label">TOTAL ATTACKS</div><div class="value" id="total-attacks">—</div></article>
+      <article class="card"><div class="label">UNIQUE ATTACKERS</div><div class="value" id="unique-attackers">—</div></article>
+      <article class="card"><div class="label">SERVICES TARGETED</div><div class="value" id="services-targeted">—</div></article>
+    </section>
+    <section class="table-wrap" aria-labelledby="recent-title">
+      <h2 id="recent-title">RECENT ATTACKS</h2>
+      <div class="scroll">
+        <table>
+          <thead><tr><th>TIME</th><th>ATTACKER IP</th><th>SERVICE</th><th>PAYLOAD</th></tr></thead>
+          <tbody id="attacks-body"><tr><td colspan="4" class="empty">Waiting for attack data…</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+  <script>
+    const API_URL = "https://honeynet-api.onrender.com"; // ⚠️ CHANGE THIS TO YOUR RENDER URL
+    let lastSeenId = 0;
+
+    async function fetchData() {
+      try {
+        const [statsResponse, attacksResponse] = await Promise.all([
+          fetch(`${API_URL}/api/stats`),
+          fetch(`${API_URL}/api/attacks`)
+        ]);
+        if (!statsResponse.ok || !attacksResponse.ok) return;
+        const [stats, attacks] = await Promise.all([statsResponse.json(), attacksResponse.json()]);
+        document.getElementById('total-attacks').textContent = stats.total_attacks ?? 0;
+        document.getElementById('unique-attackers').textContent = stats.unique_attackers ?? 0;
+        document.getElementById('services-targeted').textContent = stats.services_targeted ?? 0;
+        if (!Array.isArray(attacks)) return;
+
+        const tbody = document.getElementById('attacks-body');
+        const newestId = attacks.reduce((max, attack) => Math.max(max, Number(attack.id) || 0), lastSeenId);
+        tbody.replaceChildren();
+        if (attacks.length === 0) {
+          const row = document.createElement('tr');
+          const cell = document.createElement('td');
+          cell.colSpan = 4;
+          cell.className = 'empty';
+          cell.textContent = 'No attacks recorded yet.';
+          row.append(cell);
+          tbody.append(row);
+        } else {
+          for (const attack of attacks) {
+            const row = document.createElement('tr');
+            if (Number(attack.id) > lastSeenId) row.classList.add('new-attack');
+            const time = attack.timestamp ? new Date(attack.timestamp).toLocaleString() : '—';
+            for (const [value, className] of [
+              [time, ''], [attack.attacker_ip || '—', 'ip'],
+              [attack.service || '—', 'service'], [attack.payload || '—', 'payload']
+            ]) {
+              const cell = document.createElement('td');
+              cell.className = className;
+              cell.textContent = String(value);
+              row.append(cell);
+            }
+            tbody.append(row);
+          }
+        }
+        lastSeenId = newestId;
+      } catch (_) {
+        // Keep the last rendered dashboard visible when the API is temporarily unavailable.
+      }
+    }
+
+    fetchData();
+    setInterval(fetchData, 2000);
+  </script>
+</body>
+</html>
